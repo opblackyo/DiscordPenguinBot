@@ -12,7 +12,15 @@ def test_bot_package_imports_and_registers_ping() -> None:
     settings = Settings.from_environment({"DISCORD_CLIENT_ID": "123", "DISCORD_GUILD_ID": "456"})
     bot = create_bot(settings)
 
-    assert {command.name for command in bot.tree.get_commands()} == {"ping", "music-status"}
+    assert {command.name for command in bot.tree.get_commands()} == {
+        "ping",
+        "music-status",
+        "nowplaying",
+        "play",
+        "queue",
+        "skip",
+        "stop",
+    }
 
 
 def test_api_health_endpoint() -> None:
