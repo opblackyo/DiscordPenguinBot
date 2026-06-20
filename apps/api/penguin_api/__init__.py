@@ -1,0 +1,1 @@
+"""DiscordPenguinBot API package."""

@@ -1,0 +1,53 @@
+name: discord-penguin-bot
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: apps/bot/Dockerfile
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      LAVALINK_HOST: ${LAVALINK_HOST:-lavalink}
+      LAVALINK_PORT: ${LAVALINK_PORT:-2333}
+      LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:-}
+      LAVALINK_SECURE: ${LAVALINK_SECURE:-false}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      DASHBOARD_SECRET: ${DASHBOARD_SECRET:-}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///data/db/discord_penguin.db}
+    depends_on:
+      - lavalink
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DASHBOARD_SECRET: ${DASHBOARD_SECRET:-}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///data/db/discord_penguin.db}
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4-alpine
+    environment:
+      SERVER_PORT: 2333
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:-}
+    ports:
+      - "127.0.0.1:2333:2333"
+    restart: unless-stopped
