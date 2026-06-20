@@ -42,7 +42,7 @@ def test_now_playing_idle_is_all_null() -> None:
     }
 
 
-def test_now_playing_reuses_source_label_and_serialises_safely() -> None:
+def test_now_playing_reuses_source_label_and_never_exposes_raw_user_id() -> None:
     request = TrackRequest(
         query="x",
         requester_id=42,
@@ -54,9 +54,24 @@ def test_now_playing_reuses_source_label_and_serialises_safely() -> None:
     now_playing = build_now_playing(request, state="playing", position_ms=96000)
 
     assert now_playing["source"] == "YouTube"  # via presentation.source_label
-    assert now_playing["requester"] == "42"  # display string, not raw int identity
+    # No display-name source in Phase 2B -> requester is null, never the raw
+    # Discord snowflake.
+    assert now_playing["requester"] is None
+    assert "42" not in str(now_playing)
     assert now_playing["title"] == "夜に駆ける"
     assert now_playing["positionMs"] == 96000
+
+
+def test_snapshot_never_exposes_raw_requester_snowflake() -> None:
+    request = TrackRequest(query="x", requester_id=987654321012345678, title="T", uri="https://youtu.be/x")
+    now_playing = build_now_playing(request, state="playing", position_ms=0)
+    queue = build_queue((request,))
+
+    assert now_playing["requester"] is None
+    assert all(item["requester"] is None for item in queue)
+    snowflake = "987654321012345678"
+    assert snowflake not in str(now_playing)
+    assert snowflake not in str(queue)
 
 
 def test_queue_serialises_to_primitive_dicts() -> None:

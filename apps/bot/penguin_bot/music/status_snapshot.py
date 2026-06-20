@@ -88,7 +88,9 @@ def build_now_playing(
         "title": track_title(request),
         "author": request.author,
         "source": source_label(request),
-        "requester": str(request.requester_id),
+        # Phase 2B has no display-name source; never expose the raw Discord
+        # snowflake (TrackRequest.requester_id) as a display string.
+        "requester": None,
         "durationMs": request.duration_ms,
         "positionMs": position_ms,
         "uri": request.uri,
@@ -104,7 +106,8 @@ def build_queue(pending: Sequence[TrackRequest]) -> list[dict[str, object | None
             "title": track_title(request),
             "author": request.author,
             "source": source_label(request),
-            "requester": str(request.requester_id),
+            # No display name available; never expose the raw Discord user ID.
+            "requester": None,
             "durationMs": request.duration_ms,
         }
         for index, request in enumerate(pending)

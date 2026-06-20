@@ -165,6 +165,24 @@ def test_response_reconstructs_fields_and_drops_unknown_snapshot_keys(tmp_path: 
     assert "password" not in rendered
 
 
+def test_response_never_exposes_raw_requester_snowflake(tmp_path: Path) -> None:
+    path = tmp_path / "status.json"
+    snowflake = 987654321012345678
+    track = TrackRequest(query="x", requester_id=snowflake, title="T", uri="https://youtu.be/x", duration_ms=1000)
+    _write_snapshot(
+        path,
+        written_at=_NOW,
+        now_playing=build_now_playing(track, state="playing", position_ms=0),
+        queue=build_queue((track,)),
+    )
+
+    response = build_response(read_snapshot(path), now=_NOW, stale_after=15000)
+
+    assert response["nowPlaying"]["requester"] is None
+    assert all(item["requester"] is None for item in response["queue"])
+    assert str(snowflake) not in json.dumps(response)
+
+
 def test_lavalink_unavailable_keeps_api_online_and_distinguishes_concepts(tmp_path: Path) -> None:
     path = tmp_path / "status.json"
     _write_snapshot(
