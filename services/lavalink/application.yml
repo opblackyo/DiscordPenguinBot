@@ -1,0 +1,22 @@
+# Private Lavalink v4 configuration. Secrets stay in the ignored .env file.
+lavalink:
+  server:
+    password: ${LAVALINK_SERVER_PASSWORD}
+    sources:
+      # youtube-source replaces Lavaplayer's deprecated built-in YouTube source.
+      youtube: false
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
+      snapshot: false
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: false
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - WEB
+      - WEBEMBEDDED

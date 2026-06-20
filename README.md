@@ -1,18 +1,19 @@
 # DiscordPenguinBot
 
-DiscordPenguinBot 是一個模組化的私人 Discord 控制中心。Phase 1B 已加入 per-guild queue domain model；播放、queue 指令、AI 與 Dashboard 控制仍會在後續階段加入。
+DiscordPenguinBot 是一個模組化的私人 Discord 控制中心。Phase 1C 已加入最小可行的私人 Lavalink 音樂播放流程：搜尋單一歌曲、per-guild FIFO queue、跳過、停止與目前播放狀態。
 
 ## Current status
 
 - Discord bot：環境設定讀取、結構化 logging 與 `/ping` slash command。
 - API：FastAPI health endpoint。
 - Dashboard：React/Vite status-page skeleton。
-- Lavalink：Docker Compose 的私人 v4 node service；bot 在 Discord ready 後以 Wavelink 背景連線，離線時不會阻擋 `/ping`。
+- Lavalink：Docker Compose 的私人 v4 node service，使用官方 `youtube-source` plugin 載入 YouTube tracks；bot 在 Discord ready 後以 Wavelink 背景連線，離線時不會阻擋 `/ping`。
 - Music status：`/music-status` 只會回報 configured、reachable、host、port、secure 與安全的 error summary，絕不輸出 password。
-- Queue domain：`TrackRequest`、FIFO `GuildQueue` 與 `GuildQueueStore` 已建立為純記憶體 domain model，尚未綁定 slash command 或 Lavalink player。
-- Tests：smoke test 會匯入 bot 與 API，並確認 `/ping` 已註冊。
+- Queue domain：`TrackRequest`、FIFO `GuildQueue` 與 `GuildQueueStore` 保持為純記憶體 domain model；Wavelink 的 runtime track 只存在 playback adapter 層。
+- Music MVP：`/play query` 會搜尋一首曲目、加入呼叫者所在語音頻道並在閒置時開始播放；`/queue`、`/nowplaying`、`/skip`、`/stop` 會操作各 guild 獨立的 queue。Lavalink 未連線時，`/play` 會安全拒絕而不影響 `/ping`。
+- Tests：smoke test 會確認所有 Phase 1C 指令已註冊；playback tests 驗證 FIFO、per-guild isolation、失敗跳過與 stop 清理。
 
-未實作：音樂指令、音源搜尋、queue 指令與播放、AI、資料庫寫入、Dashboard authentication 與控制按鈕。這些功能不屬於 Phase 1B。
+刻意未實作：pause/resume、loop/shuffle、playlist、lyrics、queue persistence、Dashboard 控制與 AI。這些功能不屬於 Phase 1C。
 
 ## Prerequisites
 
@@ -46,9 +47,11 @@ Run the complete skeleton after configuration:
 docker compose up --build
 ```
 
-The API is available at `http://localhost:8000/health`; the Dashboard is available at `http://localhost:3000`. The bot registers `/ping` when it connects to Discord. A configured `DISCORD_GUILD_ID` scopes sync to that guild for development; otherwise the command is global.
+The API is available at `http://localhost:8000/health`; the Dashboard is available at `http://localhost:3000`. The bot registers `/ping`, `/music-status`, `/play`, `/queue`, `/nowplaying`, `/skip`, and `/stop` when it connects to Discord. A configured `DISCORD_GUILD_ID` scopes sync to that guild for development; otherwise the commands are global.
 
 `/music-status` is available after the bot connects to Discord. It reports whether the configured private Lavalink node is reachable without exposing `LAVALINK_PASSWORD`. A Lavalink outage is reported as a safe status error and does not prevent the bot from serving `/ping`.
+
+For playback, join a voice channel and run `/play query:<song or YouTube URL>`. Only one resolved track is accepted per command; playlist results are intentionally rejected in this phase. YouTube links containing a direct video ID are normalised to that single video, rather than accidentally loading an attached mix or playlist. When a track ends, the bot starts the next item in that server's FIFO queue. `/stop` clears the in-memory queue and disconnects the bot from voice.
 
 For local Python smoke tests:
 

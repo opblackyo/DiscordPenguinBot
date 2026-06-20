@@ -10,7 +10,16 @@ from discord import app_commands
 from discord.ext import commands
 
 from .config import Settings
-from .music import LavalinkConnectionManager, music_status
+from .music import (
+    LavalinkConnectionManager,
+    PlaybackCoordinator,
+    music_status,
+    nowplaying,
+    play,
+    queue,
+    skip,
+    stop,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +38,15 @@ class PenguinBot(commands.Bot):
         super().__init__(command_prefix=commands.when_mentioned, intents=discord.Intents.default())
         self.settings = settings
         self.lavalink = LavalinkConnectionManager(settings)
+        self.playback = PlaybackCoordinator()
         self._lavalink_task: asyncio.Task[object] | None = None
         self.tree.add_command(ping)
         self.tree.add_command(music_status)
+        self.tree.add_command(play)
+        self.tree.add_command(queue)
+        self.tree.add_command(skip)
+        self.tree.add_command(stop)
+        self.tree.add_command(nowplaying)
 
     async def setup_hook(self) -> None:
         if self.settings.discord_guild_id is None:
@@ -52,6 +67,19 @@ class PenguinBot(commands.Bot):
                 self.lavalink.initialize(self),
                 name="lavalink-initialization",
             )
+
+    async def on_wavelink_track_end(self, payload: object) -> None:
+        """Continue FIFO playback after Wavelink reports a track has ended."""
+
+        player = getattr(payload, "player", None)
+        guild = getattr(player, "guild", None)
+        guild_id = getattr(guild, "id", None)
+        if not isinstance(guild_id, int) or player is None:
+            logger.warning("Ignoring a Wavelink track-end event without a guild player.")
+            return
+        started = await self.playback.advance(guild_id, player)
+        if started is None:
+            logger.info("Queue completed for guild %s.", guild_id)
 
 
 def create_bot(settings: Settings) -> PenguinBot:

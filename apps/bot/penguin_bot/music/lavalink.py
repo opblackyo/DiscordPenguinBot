@@ -109,7 +109,7 @@ class LavalinkConnectionManager:
             retries=0,
         )
         connected_nodes = await wavelink.Pool.connect(nodes=[node], client=client)
-        return connected_nodes.get(node.identifier) is node
+        return await _wait_for_wavelink_node(connected_nodes, node)
 
     def _safe_error_summary(self, error: Exception) -> str:
         message = str(error).strip() or error.__class__.__name__
@@ -117,6 +117,42 @@ class LavalinkConnectionManager:
         if password:
             message = message.replace(password, "[redacted]")
         return f"{error.__class__.__name__}: {message[:160]}"
+
+
+def _is_connected_wavelink_node(
+    connected_nodes: dict[str, wavelink.Node], node: wavelink.Node
+) -> bool:
+    """Return true only after Wavelink has completed the node WebSocket handshake."""
+
+    return (
+        connected_nodes.get(node.identifier) is node
+        and node.status is wavelink.NodeStatus.CONNECTED
+    )
+
+
+async def _wait_for_wavelink_node(
+    connected_nodes: dict[str, wavelink.Node],
+    node: wavelink.Node,
+    *,
+    timeout_seconds: float = 4.0,
+    poll_interval_seconds: float = 0.1,
+) -> bool:
+    """Wait briefly for Lavalink's asynchronous ``ready`` WebSocket event.
+
+    Wavelink adds a node to its pool as the WebSocket is being established; the
+    node only becomes usable after Lavalink sends its ``ready`` event. This
+    bounded wait runs inside ``initialize``'s non-fatal timeout.
+    """
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    while True:
+        if _is_connected_wavelink_node(connected_nodes, node):
+            return True
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(poll_interval_seconds, remaining))
 
 
 def _format_status(status: LavalinkStatus) -> str:

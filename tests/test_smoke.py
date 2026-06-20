@@ -1,18 +1,33 @@
 import asyncio
+from types import SimpleNamespace
 
 import httpx
+import wavelink
 
 from apps.api.penguin_api.main import create_app
 from apps.bot.penguin_bot.bot import create_bot
 from apps.bot.penguin_bot.config import Settings
-from apps.bot.penguin_bot.music.lavalink import LavalinkConnectionManager, _format_status
+from apps.bot.penguin_bot.music.lavalink import (
+    LavalinkConnectionManager,
+    _format_status,
+    _is_connected_wavelink_node,
+    _wait_for_wavelink_node,
+)
 
 
 def test_bot_package_imports_and_registers_ping() -> None:
     settings = Settings.from_environment({"DISCORD_CLIENT_ID": "123", "DISCORD_GUILD_ID": "456"})
     bot = create_bot(settings)
 
-    assert {command.name for command in bot.tree.get_commands()} == {"ping", "music-status"}
+    assert {command.name for command in bot.tree.get_commands()} == {
+        "ping",
+        "music-status",
+        "nowplaying",
+        "play",
+        "queue",
+        "skip",
+        "stop",
+    }
 
 
 def test_api_health_endpoint() -> None:
@@ -106,3 +121,33 @@ def test_lavalink_connection_error_redacts_password() -> None:
     assert status.state == "offline"
     assert "secret-lavalink-password" not in (status.error_summary or "")
     assert "secret-lavalink-password" not in _format_status(status)
+
+
+def test_connecting_wavelink_node_is_not_reported_as_reachable() -> None:
+    node = SimpleNamespace(identifier="primary", status=wavelink.NodeStatus.CONNECTING)
+
+    assert _is_connected_wavelink_node({"primary": node}, node) is False
+
+    node.status = wavelink.NodeStatus.CONNECTED
+    assert _is_connected_wavelink_node({"primary": node}, node) is True
+
+
+def test_wavelink_ready_wait_handles_asynchronous_handshake() -> None:
+    async def wait_for_ready() -> bool:
+        node = SimpleNamespace(identifier="primary", status=wavelink.NodeStatus.CONNECTING)
+
+        async def finish_handshake() -> None:
+            await asyncio.sleep(0)
+            node.status = wavelink.NodeStatus.CONNECTED
+
+        task = asyncio.create_task(finish_handshake())
+        result = await _wait_for_wavelink_node(
+            {"primary": node},
+            node,
+            timeout_seconds=1,
+            poll_interval_seconds=0.01,
+        )
+        await task
+        return result
+
+    assert asyncio.run(wait_for_ready()) is True
