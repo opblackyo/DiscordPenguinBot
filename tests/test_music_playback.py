@@ -2,6 +2,7 @@ import asyncio
 
 from apps.bot.penguin_bot.music.playback import PlaybackCoordinator
 from apps.bot.penguin_bot.music.commands import _normalise_youtube_video_url
+from apps.bot.penguin_bot.music.presentation import build_queue_embed, build_track_embed, format_duration
 from apps.bot.penguin_bot.music.queue import TrackRequest
 
 
@@ -115,3 +116,40 @@ def test_youtube_video_urls_are_normalised_without_adding_playlist_support() -> 
         _normalise_youtube_video_url("https://www.youtube.com/playlist?list=PL123")
         == "https://www.youtube.com/playlist?list=PL123"
     )
+
+
+def test_track_embed_is_secret_safe_and_omits_an_empty_url() -> None:
+    track = TrackRequest(
+        query="song",
+        requester_id=123,
+        title="中文歌名",
+        author="測試作者",
+        duration_ms=65_000,
+    )
+
+    embed = build_track_embed(track, heading="🎵 正在播放")
+    rendered = str(embed.to_dict())
+
+    assert embed.url is None
+    assert "secret-lavalink-password" not in rendered
+    assert any(field.name == "長度" and field.value == "1:05" for field in embed.fields)
+    assert not any(field.name == "連結" for field in embed.fields)
+
+
+def test_duration_format_supports_minutes_and_hours() -> None:
+    assert format_duration(None) == "未知"
+    assert format_duration(0) == "0:00"
+    assert format_duration(65_000) == "1:05"
+    assert format_duration(3_661_000) == "1:01:01"
+
+
+def test_queue_embed_limits_visible_tracks_and_reports_the_remainder() -> None:
+    current = TrackRequest(query="current", requester_id=1, title="目前歌曲")
+    pending = tuple(TrackRequest(query=f"track-{index}", requester_id=index + 2) for index in range(12))
+
+    embed = build_queue_embed(current, pending)
+    upcoming = next(field for field in embed.fields if field.name.startswith("下一首"))
+
+    assert "`10` track-9" in upcoming.value
+    assert "`11`" not in upcoming.value
+    assert "…還有 2 首歌曲。" in upcoming.value
