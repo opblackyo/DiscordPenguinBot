@@ -5,13 +5,14 @@ import httpx
 from apps.api.penguin_api.main import create_app
 from apps.bot.penguin_bot.bot import create_bot
 from apps.bot.penguin_bot.config import Settings
+from apps.bot.penguin_bot.music.lavalink import LavalinkConnectionManager, _format_status
 
 
 def test_bot_package_imports_and_registers_ping() -> None:
     settings = Settings.from_environment({"DISCORD_CLIENT_ID": "123", "DISCORD_GUILD_ID": "456"})
     bot = create_bot(settings)
 
-    assert any(command.name == "ping" for command in bot.tree.get_commands())
+    assert {command.name for command in bot.tree.get_commands()} == {"ping", "music-status"}
 
 
 def test_api_health_endpoint() -> None:
@@ -41,3 +42,67 @@ def test_settings_only_reports_safe_configuration_facts() -> None:
     assert "secret-token" not in str(status)
     assert "secret-password" not in str(status)
     assert "secret-ai-key" not in str(status)
+
+
+def test_music_status_never_contains_lavalink_password() -> None:
+    settings = Settings.from_environment(
+        {
+            "LAVALINK_HOST": "private-node",
+            "LAVALINK_PORT": "2333",
+            "LAVALINK_PASSWORD": "secret-lavalink-password",
+            "LAVALINK_SECURE": "true",
+        }
+    )
+    manager = LavalinkConnectionManager(settings)
+
+    rendered = _format_status(manager.status())
+
+    assert "secret-lavalink-password" not in rendered
+    assert "private-node" in rendered
+    assert "secure: yes" in rendered
+
+
+def test_offline_lavalink_does_not_raise_or_mark_node_reachable() -> None:
+    async def unavailable_connector(_: object) -> bool:
+        return False
+
+    settings = Settings.from_environment({"LAVALINK_PASSWORD": "secret-lavalink-password"})
+    manager = LavalinkConnectionManager(settings, connector=unavailable_connector)
+
+    status = asyncio.run(manager.initialize(object()))
+
+    assert status.reachable is False
+    assert status.state == "offline"
+    assert "secret-lavalink-password" not in (status.error_summary or "")
+
+
+def test_bot_ready_keeps_running_when_lavalink_is_offline() -> None:
+    async def unavailable_connector(_: object) -> bool:
+        return False
+
+    async def initialize_bot() -> None:
+        settings = Settings.from_environment({"LAVALINK_PASSWORD": "secret-lavalink-password"})
+        bot = create_bot(settings)
+        bot.lavalink = LavalinkConnectionManager(settings, connector=unavailable_connector)
+
+        await bot.on_ready()
+        await bot._lavalink_task
+
+        assert bot.lavalink.status().state == "offline"
+        assert any(command.name == "ping" for command in bot.tree.get_commands())
+
+    asyncio.run(initialize_bot())
+
+
+def test_lavalink_connection_error_redacts_password() -> None:
+    async def failing_connector(_: object) -> bool:
+        raise RuntimeError("authorization rejected secret-lavalink-password")
+
+    settings = Settings.from_environment({"LAVALINK_PASSWORD": "secret-lavalink-password"})
+    manager = LavalinkConnectionManager(settings, connector=failing_connector)
+
+    status = asyncio.run(manager.initialize(object()))
+
+    assert status.state == "offline"
+    assert "secret-lavalink-password" not in (status.error_summary or "")
+    assert "secret-lavalink-password" not in _format_status(status)
