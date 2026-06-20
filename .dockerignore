@@ -1,0 +1,34 @@
+# Version control and local agent metadata
+.git/
+.agents/
+
+# Secrets and runtime configuration
+.env
+.env.*
+!.env.example
+secrets/
+
+# Python environments and generated files
+.venv/
+venv/
+env/
+.uv-cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# JavaScript dependencies and generated assets
+node_modules/
+apps/dashboard/node_modules/
+apps/dashboard/dist/
+.npm-cache/
+
+# Runtime data and local logs
+data/
+logs/
+tmp/
