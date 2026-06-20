@@ -63,6 +63,7 @@ class Settings:
     ai_model: str | None
     dashboard_secret: str | None
     database_url: str
+    music_status_snapshot_path: str | None
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str] | None = None) -> "Settings":
@@ -83,6 +84,7 @@ class Settings:
             ai_model=_optional_value(environment, "AI_MODEL"),
             dashboard_secret=_optional_value(environment, "DASHBOARD_SECRET"),
             database_url=environment.get("DATABASE_URL", "sqlite:///data/db/discord_penguin.db"),
+            music_status_snapshot_path=_optional_value(environment, "MUSIC_STATUS_SNAPSHOT_PATH"),
         )
 
     def require_discord_token(self) -> str:
@@ -104,4 +106,5 @@ class Settings:
             "ai_configured": all((self.ai_base_url, self.ai_api_key, self.ai_model)),
             "dashboard_secret_configured": self.dashboard_secret is not None,
             "database_url_configured": bool(self.database_url),
+            "music_status_snapshot_configured": self.music_status_snapshot_path is not None,
         }

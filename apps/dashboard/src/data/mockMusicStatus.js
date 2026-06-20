@@ -11,6 +11,13 @@
 export const MOCK_NOTICE =
   "Phase 2A read-only UI shell — values below are demo data, not yet wired to a live music API.";
 
+// Assembled fallback view, shaped like the Phase 2B API envelope sections so the
+// same components can render it when the live API is unavailable. This is ONLY
+// used as a clearly labeled fallback; live data comes from /api/music/status.
+export function buildMockView() {
+  return { services, voice, nowPlaying, queue, sources, health };
+}
+
 // Service status pills shown across the top of the dashboard.
 // status ∈ "online" | "playing" | "paused" | "idle" | "degraded" | "offline"
 export const services = [

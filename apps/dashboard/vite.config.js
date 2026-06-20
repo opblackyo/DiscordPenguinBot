@@ -7,5 +7,18 @@ import react from "@vitejs/plugin-react";
 // JSX transform, which throws "React is not defined" at runtime.
 export default defineConfig({
   plugins: [react()],
-  server: { host: true },
+  server: {
+    host: true,
+    // Dev-only convenience: mirror the production same-origin /api path so the
+    // Dashboard fetches /api/music/status in dev too. In Docker this proxy is
+    // provided by nginx (see apps/dashboard/nginx.conf); the app never calls a
+    // hardcoded host. Override the target with VITE_DEV_API_TARGET if needed.
+    proxy: {
+      "/api": {
+        target: process.env.VITE_DEV_API_TARGET || "http://127.0.0.1:8000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ""),
+      },
+    },
+  },
 });

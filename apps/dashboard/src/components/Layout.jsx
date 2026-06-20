@@ -1,7 +1,8 @@
-// App shell — branded header, scrollable content area and footer.
+// App shell — branded header, status banner, content area and footer.
 import { PenguinIcon } from "./icons.jsx";
 
-export default function Layout({ notice, children }) {
+// banner: { tone: "live" | "loading" | "degraded" | "fallback", tag, text }
+export default function Layout({ banner, footerNote, children }) {
   return (
     <div className="shell">
       <header className="topbar">
@@ -14,13 +15,13 @@ export default function Layout({ notice, children }) {
             <span className="topbar__sub">Music Control Center</span>
           </div>
         </div>
-        <span className="topbar__phase">Phase 2A · Read-only</span>
+        <span className="topbar__phase">Phase 2B · Read-only</span>
       </header>
 
-      {notice ? (
-        <div className="notice" role="note">
-          <span className="notice__tag">DEMO</span>
-          {notice}
+      {banner ? (
+        <div className={`banner banner--${banner.tone}`} role="status">
+          <span className="banner__tag">{banner.tag}</span>
+          {banner.text}
         </div>
       ) : null}
 
@@ -28,7 +29,7 @@ export default function Layout({ notice, children }) {
 
       <footer className="footer">
         <span>私人 Discord 音樂控制中心</span>
-        <span>read-only status · 尚未連接 live music API</span>
+        <span>{footerNote ?? "read-only status · GET /api/music/status"}</span>
       </footer>
     </div>
   );
