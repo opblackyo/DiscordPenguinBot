@@ -1,16 +1,17 @@
 # DiscordPenguinBot
 
-DiscordPenguinBot 是一個模組化的私人 Discord 控制中心。Phase 0 已建立可啟動的 bot、FastAPI API、React Dashboard 和私人 Lavalink v4 service 骨架；音樂播放、AI 與控制功能會在後續階段加入。
+DiscordPenguinBot 是一個模組化的私人 Discord 控制中心。Phase 1A 已加入 Lavalink v4 connection layer 與 `/music-status`；播放、queue、AI 與 Dashboard 控制仍會在後續階段加入。
 
-## Phase 0 status
+## Current status
 
 - Discord bot：環境設定讀取、結構化 logging 與 `/ping` slash command。
 - API：FastAPI health endpoint。
 - Dashboard：React/Vite status-page skeleton。
-- Lavalink：Docker Compose 的私人 v4 node service；尚未由 bot 使用。
+- Lavalink：Docker Compose 的私人 v4 node service；bot 在 Discord ready 後以 Wavelink 背景連線，離線時不會阻擋 `/ping`。
+- Music status：`/music-status` 只會回報 configured、reachable、host、port、secure 與安全的 error summary，絕不輸出 password。
 - Tests：smoke test 會匯入 bot 與 API，並確認 `/ping` 已註冊。
 
-未實作：音樂指令、音源搜尋、AI、資料庫寫入、Dashboard authentication 與控制按鈕。這些功能不屬於 Phase 0。
+未實作：音樂指令、音源搜尋、queue、AI、資料庫寫入、Dashboard authentication 與控制按鈕。這些功能不屬於 Phase 1A。
 
 ## Prerequisites
 
@@ -45,6 +46,8 @@ docker compose up --build
 ```
 
 The API is available at `http://localhost:8000/health`; the Dashboard is available at `http://localhost:3000`. The bot registers `/ping` when it connects to Discord. A configured `DISCORD_GUILD_ID` scopes sync to that guild for development; otherwise the command is global.
+
+`/music-status` is available after the bot connects to Discord. It reports whether the configured private Lavalink node is reachable without exposing `LAVALINK_PASSWORD`. A Lavalink outage is reported as a safe status error and does not prevent the bot from serving `/ping`.
 
 For local Python smoke tests:
 

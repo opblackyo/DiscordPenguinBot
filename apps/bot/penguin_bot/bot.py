@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -9,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from .config import Settings
+from .music import LavalinkConnectionManager, music_status
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,10 @@ class PenguinBot(commands.Bot):
     def __init__(self, settings: Settings) -> None:
         super().__init__(command_prefix=commands.when_mentioned, intents=discord.Intents.default())
         self.settings = settings
+        self.lavalink = LavalinkConnectionManager(settings)
+        self._lavalink_task: asyncio.Task[object] | None = None
         self.tree.add_command(ping)
+        self.tree.add_command(music_status)
 
     async def setup_hook(self) -> None:
         if self.settings.discord_guild_id is None:
@@ -38,6 +43,15 @@ class PenguinBot(commands.Bot):
         self.tree.copy_global_to(guild=guild)
         synced = await self.tree.sync(guild=guild)
         logger.info("Synced %s application commands to development guild %s.", len(synced), guild.id)
+
+    async def on_ready(self) -> None:
+        """Start the non-fatal Lavalink connection attempt after Discord is ready."""
+
+        if self._lavalink_task is None:
+            self._lavalink_task = asyncio.create_task(
+                self.lavalink.initialize(self),
+                name="lavalink-initialization",
+            )
 
 
 def create_bot(settings: Settings) -> PenguinBot:
