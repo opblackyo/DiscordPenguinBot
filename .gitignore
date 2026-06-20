@@ -46,9 +46,10 @@ data/db/
 logs/
 tmp/
 
-# Editors and operating systems
+# Editors, tooling and operating systems
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 .DS_Store
