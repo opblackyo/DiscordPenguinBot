@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import discord
+from urllib.parse import urlparse
 
 from .queue import TrackRequest
 
@@ -35,6 +36,18 @@ def track_link(request: TrackRequest) -> str:
     return f"[{title}]({request.uri})" if request.uri else title
 
 
+def source_label(request: TrackRequest) -> str:
+    """Infer a safe, display-only source label without external lookups."""
+
+    candidate = request.uri or request.query
+    host = urlparse(candidate).netloc.lower().removeprefix("www.")
+    if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+        return "YouTube"
+    if host == "bilibili.com" or host.endswith(".bilibili.com") or host == "b23.tv":
+        return "Bilibili"
+    return "Unknown"
+
+
 def build_track_embed(
     request: TrackRequest,
     *,
@@ -46,6 +59,7 @@ def build_track_embed(
     embed = discord.Embed(title=heading, description=track_link(request), colour=_EMBED_COLOUR)
     embed.add_field(name="作者", value=request.author or "未知", inline=True)
     embed.add_field(name="長度", value=format_duration(request.duration_ms), inline=True)
+    embed.add_field(name="來源", value=source_label(request), inline=True)
     embed.add_field(name="點歌者", value=f"<@{request.requester_id}>", inline=True)
     if queue_position is not None:
         embed.add_field(name="佇列位置", value=str(queue_position), inline=True)

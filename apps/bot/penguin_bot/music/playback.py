@@ -63,6 +63,28 @@ class PlaybackCoordinator:
             self._current.pop(guild_id, None)
             return await self._start_next_locked(guild_id, player)
 
+    async def advance_if_current(
+        self,
+        guild_id: int,
+        player: Player,
+        *,
+        track_uri: str | None,
+    ) -> TrackRequest | None:
+        """Advance only when a Lavalink event belongs to the active request.
+
+        Playback exceptions can be followed by a delayed track-end event. Matching
+        the URI prevents that stale event from skipping the newly started track.
+        """
+
+        async with self._lock_for(guild_id):
+            current = self._current.get(guild_id)
+            if current is None:
+                return None
+            if track_uri and current.uri and track_uri != current.uri:
+                return None
+            self._current.pop(guild_id, None)
+            return await self._start_next_locked(guild_id, player)
+
     def stop(self, guild_id: int) -> tuple[TrackRequest | None, tuple[TrackRequest, ...]]:
         """Forget the current and pending requests for a guild."""
 
