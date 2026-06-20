@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from pathlib import Path
 
 import httpx
 import wavelink
@@ -151,3 +152,11 @@ def test_wavelink_ready_wait_handles_asynchronous_handshake() -> None:
         return result
 
     assert asyncio.run(wait_for_ready()) is True
+
+
+def test_lavalink_bilibili_plugin_uses_a_fixed_jitpack_commit() -> None:
+    config = Path("services/lavalink/application.yml").read_text(encoding="utf-8")
+
+    assert 'dependency: "com.github.hoyiliang:lavabili-plugin:3bac0c10cc"' in config
+    assert 'repository: "https://jitpack.io"' in config
+    assert "bilibili: true" in config

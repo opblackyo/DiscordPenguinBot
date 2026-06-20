@@ -5,9 +5,15 @@ lavalink:
     sources:
       # youtube-source replaces Lavaplayer's deprecated built-in YouTube source.
       youtube: false
+      # Provided by the pinned lavabili-plugin dependency below.
+      bilibili: true
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
       snapshot: false
+    # Fixed JitPack commit; do not replace with a branch, latest, or snapshot.
+    - dependency: "com.github.hoyiliang:lavabili-plugin:3bac0c10cc"
+      snapshot: false
+      repository: "https://jitpack.io"
 
 plugins:
   youtube:
