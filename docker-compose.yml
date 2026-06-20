@@ -18,6 +18,9 @@ services:
       AI_MODEL: ${AI_MODEL:-}
       DASHBOARD_SECRET: ${DASHBOARD_SECRET:-}
       DATABASE_URL: ${DATABASE_URL:-sqlite:///data/db/discord_penguin.db}
+      MUSIC_STATUS_SNAPSHOT_PATH: /runtime/music-status/status.json
+    volumes:
+      - ./tmp/music-status:/runtime/music-status
     depends_on:
       lavalink:
         condition: service_healthy
@@ -27,9 +30,15 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    # The API is a read-only snapshot consumer: it is intentionally NOT given any
+    # LAVALINK_* credentials and never connects to Lavalink directly.
     environment:
       DASHBOARD_SECRET: ${DASHBOARD_SECRET:-}
       DATABASE_URL: ${DATABASE_URL:-sqlite:///data/db/discord_penguin.db}
+      MUSIC_STATUS_SNAPSHOT_PATH: /runtime/music-status/status.json
+      MUSIC_STATUS_STALE_AFTER_MS: ${MUSIC_STATUS_STALE_AFTER_MS:-15000}
+    volumes:
+      - ./tmp/music-status:/runtime/music-status:ro
     ports:
       - "127.0.0.1:8000:8000"
     restart: unless-stopped

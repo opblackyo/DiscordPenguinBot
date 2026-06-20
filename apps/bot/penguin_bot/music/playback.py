@@ -48,6 +48,20 @@ class PlaybackCoordinator:
 
         return self.queues.for_guild(guild_id).snapshot()
 
+    def current_guild_ids(self) -> tuple[int, ...]:
+        """Return the guild IDs that currently have an active track."""
+
+        return tuple(self._current)
+
+    def queued_guild_ids(self) -> tuple[int, ...]:
+        """Return the guild IDs that currently own a non-empty pending queue."""
+
+        return tuple(
+            guild_id
+            for guild_id in self.queues.active_guild_ids()
+            if not self.queues.for_guild(guild_id).is_empty
+        )
+
     async def start_if_idle(self, guild_id: int, player: Player) -> TrackRequest | None:
         """Start the next track only if this guild has no active request."""
 

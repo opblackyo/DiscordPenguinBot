@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI
 
+from .music_status import get_music_status
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +33,12 @@ def create_app() -> FastAPI:
             "status": "ok",
             "timestamp": datetime.now(UTC).isoformat(),
         }
+
+    @app.get("/music/status", tags=["music"])
+    async def music_status() -> dict[str, object]:
+        """Read-only music status. Missing/stale/invalid snapshots are 200 degraded."""
+
+        return get_music_status()
 
     return app
 

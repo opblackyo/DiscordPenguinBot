@@ -63,6 +63,14 @@ def _coordinator(interaction: discord.Interaction) -> PlaybackCoordinator | None
     return coordinator if isinstance(coordinator, PlaybackCoordinator) else None
 
 
+def _refresh_status_snapshot(interaction: discord.Interaction) -> None:
+    """Best-effort: nudge the bot to rewrite its read-only status snapshot."""
+
+    refresh = getattr(interaction.client, "refresh_status_snapshot", None)
+    if callable(refresh):
+        refresh()
+
+
 def _guild_id(interaction: discord.Interaction) -> int | None:
     return interaction.guild.id if interaction.guild is not None else None
 
@@ -171,6 +179,7 @@ async def play(interaction: discord.Interaction, query: str) -> None:
     request = _make_request(query, interaction.user.id, track)
     position = coordinator.enqueue(guild_id, request, track)
     started = await coordinator.start_if_idle(guild_id, player)
+    _refresh_status_snapshot(interaction)
     if started is request:
         await interaction.followup.send(embed=build_track_embed(request, heading="🎵 正在播放"))
     else:
@@ -234,6 +243,7 @@ async def pause(interaction: discord.Interaction) -> None:
         logger.exception("Could not pause the current track.")
         await interaction.response.send_message("無法暫停目前歌曲。", ephemeral=True)
         return
+    _refresh_status_snapshot(interaction)
     await interaction.response.send_message("⏸️ 已暫停播放。")
 
 
@@ -264,6 +274,7 @@ async def resume(interaction: discord.Interaction) -> None:
         logger.exception("Could not resume the current track.")
         await interaction.response.send_message("無法恢復目前歌曲。", ephemeral=True)
         return
+    _refresh_status_snapshot(interaction)
     await interaction.response.send_message("▶️ 已恢復播放。")
 
 
@@ -297,6 +308,7 @@ async def skip(interaction: discord.Interaction) -> None:
         logger.exception("Could not skip the current track.")
         await interaction.response.send_message("無法跳過目前歌曲。", ephemeral=True)
         return
+    _refresh_status_snapshot(interaction)
     await interaction.response.send_message("⏭️ 已跳過目前歌曲。")
 
 
@@ -329,4 +341,5 @@ async def stop(interaction: discord.Interaction) -> None:
         except Exception:
             logger.exception("Could not fully stop or disconnect the music player.")
 
+    _refresh_status_snapshot(interaction)
     await interaction.response.send_message("⏹️ 已停止播放、清空佇列並離開語音頻道。")

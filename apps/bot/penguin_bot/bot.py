@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from datetime import UTC, datetime
 
 import discord
 import wavelink
@@ -23,10 +25,31 @@ from .music import (
     skip,
     stop,
 )
+from .music.status_snapshot import (
+    MusicStatusSnapshotWriter,
+    build_error,
+    build_health,
+    build_now_playing,
+    build_payload,
+    build_queue,
+    build_service,
+    build_sources,
+    build_voice,
+    select_primary_guild,
+    wrap_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
 EMPTY_VOICE_DISCONNECT_DELAY_SECONDS = 30.0
+STATUS_SNAPSHOT_REFRESH_SECONDS = 5.0
+
+_MUSIC_HEADLINES = {
+    "playing": "播放中",
+    "paused": "已暫停",
+    "idle": "閒置",
+    "degraded": "異常",
+}
 
 
 @app_commands.command(name="ping", description="Check whether DiscordPenguinBot is responding.")
@@ -46,6 +69,13 @@ class PenguinBot(commands.Bot):
         self.playback = PlaybackCoordinator()
         self._lavalink_task: asyncio.Task[object] | None = None
         self._idle_disconnect_tasks: dict[int, asyncio.Task[None]] = {}
+        self._started_monotonic = time.monotonic()
+        self._snapshot_writer = (
+            MusicStatusSnapshotWriter(settings.music_status_snapshot_path)
+            if settings.music_status_snapshot_path
+            else None
+        )
+        self._snapshot_task: asyncio.Task[None] | None = None
         self.tree.add_command(ping)
         self.tree.add_command(music_status)
         self.tree.add_command(play)
@@ -75,6 +105,194 @@ class PenguinBot(commands.Bot):
                 self.lavalink.initialize(self),
                 name="lavalink-initialization",
             )
+        self._start_status_snapshot_loop()
+        self.refresh_status_snapshot()
+
+    def _start_status_snapshot_loop(self) -> None:
+        if self._snapshot_writer is None or self._snapshot_task is not None:
+            return
+        self._snapshot_task = asyncio.create_task(
+            self._status_snapshot_loop(),
+            name="music-status-snapshot",
+        )
+
+    async def _status_snapshot_loop(self) -> None:
+        """Refresh the snapshot periodically so its freshness is bounded."""
+
+        try:
+            while True:
+                await asyncio.sleep(STATUS_SNAPSHOT_REFRESH_SECONDS)
+                self.refresh_status_snapshot()
+        except asyncio.CancelledError:
+            raise
+
+    def refresh_status_snapshot(self) -> None:
+        """Best-effort rebuild and write of the sanitized status snapshot.
+
+        Never raises: snapshot bookkeeping must not affect playback. Commands and
+        event handlers call this after mutating playback state.
+        """
+
+        if self._snapshot_writer is None:
+            return
+        try:
+            snapshot = self._build_status_snapshot()
+        except Exception:
+            logger.warning("Could not build the music status snapshot (non-fatal).", exc_info=True)
+            return
+        self._snapshot_writer.write(snapshot)
+
+    def _build_status_snapshot(self) -> dict[str, object]:
+        settings = self.settings
+        coordinator = self.playback
+        lavalink_status = self.lavalink.status()
+
+        primary_guild = select_primary_guild(
+            settings.discord_guild_id,
+            coordinator.current_guild_ids(),
+            coordinator.queued_guild_ids(),
+        )
+        current = coordinator.current(primary_guild) if primary_guild is not None else None
+        pending = coordinator.pending(primary_guild) if primary_guild is not None else ()
+
+        player = self._player_for_guild(primary_guild)
+        position_ms, paused = self._player_playback_facts(player)
+        if current is None:
+            now_state = "idle"
+        elif paused:
+            now_state = "paused"
+        else:
+            now_state = "playing"
+
+        now_playing = build_now_playing(
+            current,
+            state=now_state,
+            position_ms=position_ms if now_state != "idle" else None,
+        )
+        voice_state, guild_name, channel_name, listeners = self._voice_facts(player)
+        voice = build_voice(
+            state=voice_state,
+            guild=guild_name,
+            channel=channel_name,
+            listeners=listeners,
+        )
+
+        active_players = len(coordinator.current_guild_ids())
+        errors: list[dict[str, str]] = []
+
+        bot_service = build_service(
+            "bot",
+            "Discord Bot",
+            "online",
+            "在線",
+            f"已連線（{len(self.guilds)} 個伺服器）",
+            meta=f"{active_players} 個作用中的 player" if active_players else None,
+        )
+        if lavalink_status.reachable:
+            lavalink_service = build_service(
+                "lavalink",
+                "Lavalink",
+                "online",
+                "可連線",
+                "私人 v4 node 已就緒",
+                meta="youtube-source + lavabili",
+            )
+        else:
+            lavalink_service = build_service(
+                "lavalink",
+                "Lavalink",
+                "offline",
+                "離線",
+                "Lavalink 目前無法連線",
+            )
+            errors.append(
+                build_error("lavalink", "LAVALINK_UNREACHABLE", "Lavalink is currently unreachable.")
+            )
+
+        music_status_value = self._music_status_value(now_state, lavalink_status.reachable)
+        music_service = build_service(
+            "music",
+            "Music",
+            music_status_value,
+            _MUSIC_HEADLINES.get(music_status_value, "未知"),
+            self._music_detail(voice_state, channel_name),
+            meta=f"{active_players} 個作用中的 player" if active_players else "閒置",
+        )
+
+        services = [bot_service, lavalink_service, music_service]
+        health = build_health(
+            uptime=self._uptime_text(),
+            active_players=active_players,
+            lavalink_secure=settings.lavalink_secure,
+            region="本機私人部署",
+        )
+        payload = build_payload(
+            services=services,
+            voice=voice,
+            now_playing=now_playing,
+            queue=build_queue(pending),
+            sources=build_sources(),
+            health=health,
+            errors=errors,
+        )
+        return wrap_snapshot(payload, written_at_iso=datetime.now(UTC).isoformat())
+
+    @staticmethod
+    def _music_status_value(now_state: str, lavalink_reachable: bool) -> str:
+        if not lavalink_reachable:
+            return "degraded"
+        if now_state in {"playing", "paused"}:
+            return now_state
+        return "idle"
+
+    @staticmethod
+    def _music_detail(voice_state: str, channel_name: str | None) -> str:
+        if voice_state == "connected" and channel_name:
+            return f"正在 {channel_name} 串流"
+        return "目前沒有播放中的歌曲"
+
+    def _player_for_guild(self, guild_id: int | None) -> wavelink.Player | None:
+        if guild_id is None:
+            return None
+        guild = self.get_guild(guild_id)
+        voice_client = guild.voice_client if guild is not None else None
+        return voice_client if isinstance(voice_client, wavelink.Player) else None
+
+    @staticmethod
+    def _player_playback_facts(player: wavelink.Player | None) -> tuple[int | None, bool]:
+        if player is None:
+            return None, False
+        raw_position = getattr(player, "position", None)
+        position_ms = int(raw_position) if isinstance(raw_position, (int, float)) else None
+        return position_ms, bool(getattr(player, "paused", False))
+
+    @staticmethod
+    def _voice_facts(
+        player: wavelink.Player | None,
+    ) -> tuple[str, str | None, str | None, int]:
+        if player is None:
+            return "disconnected", None, None, 0
+        guild = getattr(player, "guild", None)
+        channel = getattr(player, "channel", None)
+        members = getattr(channel, "members", ())
+        listeners = sum(1 for member in members if not bool(getattr(member, "bot", False)))
+        return (
+            "connected",
+            getattr(guild, "name", None),
+            getattr(channel, "name", None),
+            listeners,
+        )
+
+    def _uptime_text(self) -> str:
+        elapsed = max(0, int(time.monotonic() - self._started_monotonic))
+        days, remainder = divmod(elapsed, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, _ = divmod(remainder, 60)
+        if days:
+            return f"{days} 天 {hours} 小時 {minutes} 分"
+        if hours:
+            return f"{hours} 小時 {minutes} 分"
+        return f"{minutes} 分"
 
     async def on_wavelink_track_end(self, payload: object) -> None:
         """Continue FIFO playback after Wavelink reports a track has ended."""
@@ -89,6 +307,7 @@ class PenguinBot(commands.Bot):
         started = await self.playback.advance_if_current(guild_id, player, track_uri=track_uri)
         if started is None:
             logger.info("Queue completed for guild %s.", guild_id)
+        self.refresh_status_snapshot()
 
     async def on_wavelink_track_exception(self, payload: object) -> None:
         """Safely recover from a Lavalink track exception without stopping the bot."""
@@ -114,6 +333,7 @@ class PenguinBot(commands.Bot):
             self._cancel_idle_disconnect(guild_id)
             self.playback.stop(guild_id)
             logger.info("Cleared playback state after the bot left voice in guild %s.", guild_id)
+            self.refresh_status_snapshot()
             return
 
         player = guild.voice_client
@@ -141,6 +361,7 @@ class PenguinBot(commands.Bot):
         started = await self.playback.advance_if_current(guild_id, player, track_uri=track_uri)
         if started is None:
             logger.info("No queued track remained after playback failure in guild %s.", guild_id)
+        self.refresh_status_snapshot()
 
     def _schedule_idle_disconnect(self, guild_id: int, player: wavelink.Player) -> None:
         existing = self._idle_disconnect_tasks.get(guild_id)
@@ -165,6 +386,7 @@ class PenguinBot(commands.Bot):
             self.playback.stop(guild_id)
             await player.disconnect()
             logger.info("Left an empty voice channel and cleared playback state for guild %s.", guild_id)
+            self.refresh_status_snapshot()
         except asyncio.CancelledError:
             raise
         except Exception:
