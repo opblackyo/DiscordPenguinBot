@@ -1,6 +1,7 @@
 import asyncio
 
 from apps.bot.penguin_bot.music.playback import PlaybackCoordinator
+from apps.bot.penguin_bot.music.commands import _normalise_youtube_video_url
 from apps.bot.penguin_bot.music.queue import TrackRequest
 
 
@@ -97,3 +98,20 @@ def test_stop_clears_current_and_pending_requests() -> None:
         assert coordinator.pending(100) == ()
 
     asyncio.run(run())
+
+
+def test_youtube_video_urls_are_normalised_without_adding_playlist_support() -> None:
+    assert (
+        _normalise_youtube_video_url("https://youtu.be/9bc1bb60DRI?si=tracking")
+        == "https://www.youtube.com/watch?v=9bc1bb60DRI"
+    )
+    assert (
+        _normalise_youtube_video_url(
+            "https://www.youtube.com/watch?v=9bc1bb60DRI&list=RD9bc1bb60DRI&start_radio=1"
+        )
+        == "https://www.youtube.com/watch?v=9bc1bb60DRI"
+    )
+    assert (
+        _normalise_youtube_video_url("https://www.youtube.com/playlist?list=PL123")
+        == "https://www.youtube.com/playlist?list=PL123"
+    )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, cast
+from urllib.parse import parse_qs, urlparse
 
 import discord
 import wavelink
@@ -36,10 +37,29 @@ def _make_request(query: str, requester_id: int, track: wavelink.Playable) -> Tr
 async def _resolve_track(query: str) -> wavelink.Playable | None:
     """Resolve exactly one playable track; playlists are deliberately out of scope."""
 
-    results = await wavelink.Playable.search(query)
+    results = await wavelink.Playable.search(_normalise_youtube_video_url(query))
     if not results or isinstance(results, wavelink.Playlist):
         return None
     return results[0]
+
+
+def _normalise_youtube_video_url(query: str) -> str:
+    """Keep a direct YouTube video request from accidentally loading a mix.
+
+    Users commonly share URLs that include ``list=RD...`` or tracking parameters.
+    Phase 1C intentionally does not support playlists, so preserve only a direct
+    video ID when the URL contains one and leave all other queries unchanged.
+    """
+
+    parsed = urlparse(query.strip())
+    host = parsed.netloc.lower().removeprefix("www.")
+    video_id: str | None = None
+    if host == "youtu.be":
+        video_id = parsed.path.strip("/").split("/")[0] or None
+    elif host in {"youtube.com", "m.youtube.com", "music.youtube.com"}:
+        video_id = parse_qs(parsed.query).get("v", [None])[0]
+
+    return f"https://www.youtube.com/watch?v={video_id}" if video_id else query.strip()
 
 
 def _coordinator(interaction: discord.Interaction) -> PlaybackCoordinator | None:
