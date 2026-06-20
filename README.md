@@ -53,6 +53,41 @@ Bot runtime state
 
 **本階段仍未做**：play / skip / stop / pause / resume 控制、mutation endpoint、登入 / 權限、WebSocket、database persistence、新增 bot command；未改 Lavalink plugin 版本、既有播放流程或 API `/health`。
 
+#### 本機開發與營運（local dev / ops）
+
+完整 stack 直接 `docker compose up --build` 即可；以下是只驗證 read-only 狀態鏈、不啟動 bot（避免用真 token 連 Discord）的做法：
+
+1. 只啟動 API 與 Dashboard：
+
+   ```powershell
+   docker compose up -d --build api dashboard
+   ```
+
+2. 注入一份測試快照到共享 runtime 目錄（API 以唯讀掛載讀取）。`./tmp/music-status` 是 **runtime-only、git-ignored、可刪可重生、不含 secret**；缺少時 bot 端 writer 會自動建立：
+
+   ```powershell
+   # 寫入 ./tmp/music-status/status.json 後即可被 api 讀到
+   # （實際執行時由 bot 自動寫出；本機驗證可用 status_snapshot 的 builders 產生一份）
+   ```
+
+3. 驗證端點：
+
+   ```powershell
+   curl http://localhost:8000/health
+   curl http://localhost:8000/music/status
+   curl http://localhost:3000/api/music/status   # 經 dashboard nginx 同源代理，必為 JSON 而非 index.html
+   ```
+
+4. 收尾（避免殘留容器占用 port 8000 / 3000）：
+
+   ```powershell
+   docker compose down
+   ```
+
+純前端開發（`npm run dev`）時，Vite dev server 會把 `/api` 代理到 API，等同 docker 內 nginx 的同源行為；預設目標 `http://127.0.0.1:8000`，可用 **dev-only** 環境變數 `VITE_DEV_API_TARGET` 覆寫（僅影響本機 dev，docker/production 路徑一律走 nginx 的 `/api`）。
+
+快照逾時門檻由 `MUSIC_STATUS_STALE_AFTER_MS`（API，預設 15000ms）決定；超過即回 `degraded` 並帶 `SNAPSHOT_STALE`。bot 每 5 秒定期改寫快照，因此正常運行時 `snapshotWrittenAt` 會持續更新；bot 停止後快照轉為 stale，API 仍回 200 degraded，不會讓 Dashboard 白屏。
+
 ## Prerequisites
 
 - Docker Desktop with Docker Compose v2+
