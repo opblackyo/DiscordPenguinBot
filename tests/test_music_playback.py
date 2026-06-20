@@ -1,8 +1,14 @@
 import asyncio
+from types import SimpleNamespace
 
+from apps.bot.penguin_bot.music.commands import _can_control_playback, _normalise_youtube_video_url
 from apps.bot.penguin_bot.music.playback import PlaybackCoordinator
-from apps.bot.penguin_bot.music.commands import _normalise_youtube_video_url
-from apps.bot.penguin_bot.music.presentation import build_queue_embed, build_track_embed, format_duration
+from apps.bot.penguin_bot.music.presentation import (
+    build_queue_embed,
+    build_track_embed,
+    format_duration,
+    source_label,
+)
 from apps.bot.penguin_bot.music.queue import TrackRequest
 
 
@@ -153,3 +159,59 @@ def test_queue_embed_limits_visible_tracks_and_reports_the_remainder() -> None:
     assert "`10` track-9" in upcoming.value
     assert "`11`" not in upcoming.value
     assert "…還有 2 首歌曲。" in upcoming.value
+
+
+def test_source_label_is_inferred_without_network_access() -> None:
+    assert source_label(TrackRequest(query="x", requester_id=1, uri="https://youtu.be/abc")) == "YouTube"
+    assert (
+        source_label(TrackRequest(query="x", requester_id=1, uri="https://www.bilibili.com/video/BV1"))
+        == "Bilibili"
+    )
+    assert source_label(TrackRequest(query="local file", requester_id=1)) == "Unknown"
+
+
+def test_stale_playback_event_does_not_skip_the_new_current_track() -> None:
+    async def run() -> None:
+        coordinator = PlaybackCoordinator()
+        player = FakePlayer()
+        first = TrackRequest(query="first", requester_id=1, uri="https://example.test/first")
+        second = TrackRequest(query="second", requester_id=1, uri="https://example.test/second")
+        coordinator.enqueue(100, first, object())
+        coordinator.enqueue(100, second, object())
+        await coordinator.start_if_idle(100, player)
+
+        assert await coordinator.advance_if_current(
+            100,
+            player,
+            track_uri="https://example.test/not-current",
+        ) is None
+        assert coordinator.current(100) is first
+
+        assert await coordinator.advance_if_current(100, player, track_uri=first.uri) is second
+        assert coordinator.current(100) is second
+
+    asyncio.run(run())
+
+
+def test_control_permission_allows_privileged_requester_or_same_voice_user() -> None:
+    request = TrackRequest(query="song", requester_id=10)
+    channel = object()
+
+    def member(
+        member_id: int,
+        *,
+        administrator: bool = False,
+        manage_guild: bool = False,
+        voice_channel: object | None = None,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=member_id,
+            guild_permissions=SimpleNamespace(administrator=administrator, manage_guild=manage_guild),
+            voice=SimpleNamespace(channel=voice_channel),
+        )
+
+    assert _can_control_playback(member(1, administrator=True), request, channel) is True
+    assert _can_control_playback(member(1, manage_guild=True), request, channel) is True
+    assert _can_control_playback(member(10), request, None) is True
+    assert _can_control_playback(member(2, voice_channel=channel), request, channel) is True
+    assert _can_control_playback(member(2), request, channel) is False

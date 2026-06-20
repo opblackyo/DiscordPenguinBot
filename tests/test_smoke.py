@@ -14,6 +14,7 @@ from apps.bot.penguin_bot.music.lavalink import (
     _is_connected_wavelink_node,
     _wait_for_wavelink_node,
 )
+from apps.bot.penguin_bot.music.queue import TrackRequest
 
 
 def test_bot_package_imports_and_registers_ping() -> None:
@@ -24,8 +25,10 @@ def test_bot_package_imports_and_registers_ping() -> None:
         "ping",
         "music-status",
         "nowplaying",
+        "pause",
         "play",
         "queue",
+        "resume",
         "skip",
         "stop",
     }
@@ -152,6 +155,31 @@ def test_wavelink_ready_wait_handles_asynchronous_handshake() -> None:
         return result
 
     assert asyncio.run(wait_for_ready()) is True
+
+
+def test_bot_voice_departure_clears_active_and_pending_playback() -> None:
+    class FakePlayer:
+        async def play(self, _: object) -> None:
+            return None
+
+    async def run() -> None:
+        bot = create_bot(Settings.from_environment())
+        bot._connection.user = SimpleNamespace(id=999)
+        first = TrackRequest(query="first", requester_id=1)
+        second = TrackRequest(query="second", requester_id=2)
+        bot.playback.enqueue(100, first, object())
+        bot.playback.enqueue(100, second, object())
+        await bot.playback.start_if_idle(100, FakePlayer())
+
+        member = SimpleNamespace(id=999, guild=SimpleNamespace(id=100, voice_client=None))
+        before = SimpleNamespace(channel=object())
+        after = SimpleNamespace(channel=None)
+        await bot.on_voice_state_update(member, before, after)
+
+        assert bot.playback.current(100) is None
+        assert bot.playback.pending(100) == ()
+
+    asyncio.run(run())
 
 
 def test_lavalink_bilibili_plugin_uses_a_fixed_jitpack_commit() -> None:

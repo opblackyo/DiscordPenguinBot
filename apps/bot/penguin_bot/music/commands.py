@@ -104,6 +104,28 @@ def _lavalink_is_reachable(interaction: discord.Interaction) -> bool:
     return bool(callable(status) and status().reachable)
 
 
+def _existing_player(interaction: discord.Interaction) -> wavelink.Player | None:
+    guild = interaction.guild
+    voice_client = guild.voice_client if guild is not None else None
+    return voice_client if isinstance(voice_client, wavelink.Player) else None
+
+
+def _can_control_playback(
+    member: object,
+    request: TrackRequest,
+    bot_channel: object | None,
+) -> bool:
+    """Apply the Phase 1F in-memory control policy without a database lookup."""
+
+    permissions = getattr(member, "guild_permissions", None)
+    if bool(getattr(permissions, "administrator", False)) or bool(getattr(permissions, "manage_guild", False)):
+        return True
+    if getattr(member, "id", None) == request.requester_id:
+        return True
+    member_channel = getattr(getattr(member, "voice", None), "channel", None)
+    return bot_channel is not None and member_channel == bot_channel
+
+
 async def _send_queue(interaction: discord.Interaction, coordinator: PlaybackCoordinator, guild_id: int) -> None:
     current = coordinator.current(guild_id)
     pending = coordinator.pending(guild_id)
@@ -185,6 +207,66 @@ async def nowplaying(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(embed=build_track_embed(current, heading="🎵 正在播放"))
 
 
+@app_commands.command(name="pause", description="暫停這個伺服器目前播放的歌曲。")
+async def pause(interaction: discord.Interaction) -> None:
+    coordinator = _coordinator(interaction)
+    guild_id = _guild_id(interaction)
+    if coordinator is None or guild_id is None:
+        await interaction.response.send_message("此處無法使用音樂播放功能。", ephemeral=True)
+        return
+    if coordinator.current(guild_id) is None:
+        await interaction.response.send_message("目前沒有播放中的歌曲。", ephemeral=True)
+        return
+    if _existing_player(interaction) is None:
+        await interaction.response.send_message("Bot 目前不在語音頻道。", ephemeral=True)
+        return
+
+    player, error = await _get_or_connect_player(interaction)
+    if error is not None or player is None:
+        await interaction.response.send_message(error or "找不到音樂播放器。", ephemeral=True)
+        return
+    if player.paused:
+        await interaction.response.send_message("目前歌曲已經暫停。", ephemeral=True)
+        return
+    try:
+        await player.pause(True)
+    except Exception:
+        logger.exception("Could not pause the current track.")
+        await interaction.response.send_message("無法暫停目前歌曲。", ephemeral=True)
+        return
+    await interaction.response.send_message("⏸️ 已暫停播放。")
+
+
+@app_commands.command(name="resume", description="恢復這個伺服器目前暫停的歌曲。")
+async def resume(interaction: discord.Interaction) -> None:
+    coordinator = _coordinator(interaction)
+    guild_id = _guild_id(interaction)
+    if coordinator is None or guild_id is None:
+        await interaction.response.send_message("此處無法使用音樂播放功能。", ephemeral=True)
+        return
+    if coordinator.current(guild_id) is None:
+        await interaction.response.send_message("目前沒有可恢復的歌曲。", ephemeral=True)
+        return
+    if _existing_player(interaction) is None:
+        await interaction.response.send_message("Bot 目前不在語音頻道。", ephemeral=True)
+        return
+
+    player, error = await _get_or_connect_player(interaction)
+    if error is not None or player is None:
+        await interaction.response.send_message(error or "找不到音樂播放器。", ephemeral=True)
+        return
+    if not player.paused:
+        await interaction.response.send_message("目前歌曲沒有暫停。", ephemeral=True)
+        return
+    try:
+        await player.pause(False)
+    except Exception:
+        logger.exception("Could not resume the current track.")
+        await interaction.response.send_message("無法恢復目前歌曲。", ephemeral=True)
+        return
+    await interaction.response.send_message("▶️ 已恢復播放。")
+
+
 @app_commands.command(name="skip", description="跳過這個伺服器目前播放的歌曲。")
 async def skip(interaction: discord.Interaction) -> None:
     coordinator = _coordinator(interaction)
@@ -194,6 +276,15 @@ async def skip(interaction: discord.Interaction) -> None:
         return
     if coordinator.current(guild_id) is None:
         await interaction.response.send_message("目前沒有播放中的歌曲。", ephemeral=True)
+        return
+
+    player_before_permission_check = _existing_player(interaction)
+    if player_before_permission_check is not None and not _can_control_playback(
+        interaction.user,
+        coordinator.current(guild_id),
+        player_before_permission_check.channel,
+    ):
+        await interaction.response.send_message("你沒有跳過目前歌曲的權限。", ephemeral=True)
         return
 
     player, error = await _get_or_connect_player(interaction)
@@ -217,6 +308,18 @@ async def stop(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("此處無法使用音樂播放功能。", ephemeral=True)
         return
 
+    current = coordinator.current(guild_id)
+    pending = coordinator.pending(guild_id)
+    if current is None and not pending:
+        await interaction.response.send_message("目前沒有進行中的播放或佇列。", ephemeral=True)
+        return
+
+    control_request = current or pending[0]
+    player = _existing_player(interaction)
+    if player is not None and not _can_control_playback(interaction.user, control_request, player.channel):
+        await interaction.response.send_message("你沒有停止播放的權限。", ephemeral=True)
+        return
+
     current, pending = coordinator.stop(guild_id)
     voice_client = interaction.guild.voice_client if interaction.guild is not None else None
     if isinstance(voice_client, wavelink.Player):
@@ -226,7 +329,4 @@ async def stop(interaction: discord.Interaction) -> None:
         except Exception:
             logger.exception("Could not fully stop or disconnect the music player.")
 
-    if current is None and not pending:
-        await interaction.response.send_message("目前沒有進行中的播放或佇列。", ephemeral=True)
-        return
     await interaction.response.send_message("⏹️ 已停止播放、清空佇列並離開語音頻道。")
